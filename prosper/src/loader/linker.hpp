@@ -53,6 +53,14 @@ struct LinkInput {
     // `loader/support_modules.hpp` for the full census and the NID-overlap analysis behind
     // "believed safe".
     bool only_if_imported = false;
+
+    // PROTOTYPE (#4139). Link and map the module, but do not run its init function / init_array at
+    // boot. They are recorded in Program::deferred_inits and run when the guest itself calls
+    // sceKernelLoadStartModule for this path. A title that loads its own middleware at runtime
+    // (Assassin's Creed Black Flag Resynced: libmemorywrapper_f must be initialised by the eboot
+    // BEFORE libaegir_f's static constructors allocate) otherwise has those constructors run before
+    // the title has had any chance to prepare the module they depend on.
+    bool defer_init = false;
 };
 
 struct Program {
@@ -60,6 +68,9 @@ struct Program {
     std::vector<LoadedImage>             imgs;    // parallel to mods
     std::vector<ImportSlot>              slots;   // unresolved FUNCTION imports -> code stub slots
     std::vector<uint64_t>                init_fns; // dependent-module init fns, in call order
+    // Init fns of LinkInput::defer_init modules, keyed by lowercase basename, in call order. Run by
+    // run_deferred_module_init() on the guest's first sceKernelLoadStartModule of that module.
+    std::vector<std::pair<std::string, std::vector<uint64_t>>> deferred_inits;
     std::vector<TlsModuleDesc>           tls_templates; // indexed by module TLS id (0 = unused)
     uint64_t entry = 0;                            // main module entry
     uint64_t stub_base = 0, stub_size = 96;   // 96 contains the largest guest-%fs swap stub (94 bytes)

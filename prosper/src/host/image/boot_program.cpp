@@ -273,7 +273,14 @@ std::vector<LinkInput> boot_link_inputs(const std::string& d, bool verbose) {
             // NIDs); linking both would run two init_arrays and make dlsym answer differently per
             // module handle. Deduplicating on exports rather than on a filename suffix also degrades
             // correctly for a title that ships only the debug variant — nothing collides, so it links.
-            in.insert(in.begin() + (ptrdiff_t)(insert_at + slot), { path, base, true });
+            LinkInput li{ path, base, true };
+            // #4139 PROTOTYPE, opt-in. A PRX that sits beside eboot.bin and that the eboot does not
+            // import by name is one the title loads itself, so its constructors belong to that
+            // sceKernelLoadStartModule call, not to boot. Media/Plugins stay eager.
+            if (getenv("PROSPER_DEFER_ROOT_PRX_INIT") && path.find("/Media/Plugins") == std::string::npos &&
+                path.find("\Media\Plugins") == std::string::npos)
+                li.defer_init = true;
+            in.insert(in.begin() + (ptrdiff_t)(insert_at + slot), li);
             slot++;
         }
     }
@@ -311,6 +318,23 @@ std::vector<LinkInput> boot_link_inputs(const std::string& d, bool verbose) {
         }
     }
     drop_unimported_support_modules(in, say);
+    // Veto deferral for a module the eboot imports statically: a real loader initialises those
+    // before the eboot runs.
+    bool any_defer = false;
+    for (const auto& e : in) any_defer = any_defer || e.defer_init;
+    if (any_defer) {
+        std::string perr;
+        if (auto m = Module::load(in[0].path, &perr)) {
+            for (auto& e : in)
+                if (e.defer_init)
+                    for (const auto& imp : m->imports)
+                        if (imp.lib_name == support_module_lib_name(e.path)) { e.defer_init = false; break; }
+        } else {
+            for (auto& e : in) e.defer_init = false;   // importer unreadable: stay eager
+        }
+        for (const auto& e : in)
+            if (e.defer_init) say("init DEFERRED until the guest loads it: %s\n", e.path.c_str());
+    }
     return in;
 }
 
