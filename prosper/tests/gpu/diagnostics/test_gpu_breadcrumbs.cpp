@@ -6,6 +6,7 @@
 // whether a real AMD or NV driver executes those writes before a hang: stock lavapipe exposes neither
 // marker extension, so no CI job can. That half is a local run on real hardware (see the PR).
 #include "gpu/diagnostics/gpu_breadcrumbs.hpp"
+#include <gtest/gtest.h>
 #include "gpu/diagnostics/gpu_breadcrumbs_vk.hpp"
 
 #include <cstdint>
@@ -15,9 +16,7 @@
 
 using namespace prosper::gpu;
 
-static int fails = 0;
-#define CHECK(c, m) do { if (!(c)) { std::printf("  [FAIL] %s\n", m); fails++; } \
-                         else { std::printf("  [ok]   %s\n", m); } } while (0)
+#define CHECK(c, m) EXPECT_TRUE(c) << (m)
 
 namespace {
 
@@ -347,16 +346,12 @@ void support_selection() {
 
 } // namespace
 
-int main() {
-    std::printf("== ids and ring ==\n");               ids_and_ring();
-    std::printf("== verdict arithmetic ==\n");         verdict_arithmetic();
-    std::printf("== id wraparound ==\n");              wraparound();
-    std::printf("== checkpoint reduction ==\n");       checkpoint_reduction();
-    std::printf("== report text ==\n");                report_text();
-    std::printf("== inactive emitter ==\n");           inactive_emitter_does_nothing();
-    std::printf("== AMD buffer marker path ==\n");     amd_path();
-    std::printf("== NV checkpoint path ==\n");         nv_path();
-    std::printf("== extension selection ==\n");        support_selection();
-    std::printf(fails ? "FAILED (%d)\n" : "PASSED\n", fails);
-    return fails ? 1 : 0;
-}
+TEST(GpuBreadcrumbs, IdsAndRing) { ids_and_ring(); }
+TEST(GpuBreadcrumbs, VerdictArithmetic) { verdict_arithmetic(); }
+TEST(GpuBreadcrumbs, Wraparound) { wraparound(); }
+TEST(GpuBreadcrumbs, CheckpointReduction) { checkpoint_reduction(); }
+TEST(GpuBreadcrumbs, ReportText) { report_text(); }
+TEST(GpuBreadcrumbs, InactiveEmitterDoesNothing) { inactive_emitter_does_nothing(); }
+TEST(GpuBreadcrumbs, AmdPath) { amd_path(); }
+TEST(GpuBreadcrumbs, NvPath) { nv_path(); }
+TEST(GpuBreadcrumbs, SupportSelection) { support_selection(); }
