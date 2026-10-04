@@ -271,13 +271,45 @@ TEST(GapOpcodeRefusals, ImageGather4) {
         0x7e0202f0u,   // v_mov_b32 v1, 0.5
     };
 
-    expect_compiles(program(prologue, {control[0], control[1]}), 0xA050ull,
-                    "control: image_gather4_lz with the texture table", &rt, config);
+    const auto spv_control =
+        compile(program(prologue, {control[0], control[1]}), 0xA050ull, &rt, config);
+    EXPECT_FALSE(spv_control.empty()) << "control: image_gather4_lz with the texture table";
+    const auto spv_gather = compile(program(prologue, {w[0], w[1]}), 0xA051ull, &rt, config);
+    EXPECT_FALSE(spv_gather.empty()) << "image_gather4 with the texture table";
+    EXPECT_EQ(spv_gather, spv_control) << "image_gather4 on single-level resource must produce "
+                                          "word-for-word identical module to image_gather4_lz";
+
     EXPECT_TRUE(
         compile(program(prologue, {control[0], control[1]}), 0xA052ull, nullptr, config).empty())
         << "control without a resource table must refuse, or the table is not load-bearing";
-    expect_compiles(program(prologue, {w[0], w[1]}), 0xA051ull,
-                    "image_gather4 with the texture table", &rt, config);
     EXPECT_TRUE(compile(program(prologue, {w[0], w[1]}), 0xA053ull, nullptr, config).empty())
         << "image_gather4 without a resource table must refuse, or the table is not load-bearing";
+
+    // Gate checks in fragment stage: multi-level texture (declared_mip_levels == 2) must refuse
+    // with op=0x40 reject; single-level texture (declared_mip_levels == 1) with an MRT0 export must compile.
+    const std::vector<uint32_t> frag_export = {
+        0xf800180fu,
+        0x03020100u,   // exp mrt0 v0, v1, v2, v3 done vm
+    };
+    const auto fragment_prog = program(prologue, {w[0], w[1], frag_export[0], frag_export[1]});
+
+    ShaderResourceTable frag_rt_single = rt;
+    frag_rt_single.resources[0].declared_mip_levels = 1u;
+    EXPECT_FALSE(
+        recompile_fragment(fragment_prog.data(), fragment_prog.size(), &frag_rt_single).empty())
+        << "image_gather4 in fragment stage must compile for single-level resource with export";
+
+    ShaderResourceTable frag_rt_multi = rt;
+    frag_rt_multi.resources[0].declared_mip_levels = 2u;
+    const uint64_t frag_multi_addr = 0xA054ull;
+    const auto spv_multi = recompile_fragment(
+        fragment_prog.data(), fragment_prog.size(), &frag_rt_multi, nullptr, UINT32_MAX, nullptr,
+        false, RecompileDiagnosticContext{RecompileDiagnosticStage::Fragment, frag_multi_addr});
+    EXPECT_TRUE(spv_multi.empty())
+        << "image_gather4 in fragment stage must refuse for multi-level resource";
+    const std::string frag_reject = last_terminal_reject_reason(frag_multi_addr);
+    RejectRecord frag_rec = parse_reject(frag_reject);
+    EXPECT_EQ(frag_rec.tag, "recompile-reject") << frag_reject;
+    EXPECT_EQ(frag_rec.fields["op"], "0x40")
+        << "rejection must be triggered by image_gather4 (op=0x40): " << frag_reject;
 }
