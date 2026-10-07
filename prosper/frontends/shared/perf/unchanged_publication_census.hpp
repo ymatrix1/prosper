@@ -104,7 +104,8 @@ public:
         std::lock_guard lock(mutex_);
         totals_.hash_ns += hash_ns;
         Entry& e = targets_[address];
-        const bool same_shape = e.seen && e.generation == generation && e.width == width && e.height == height && e.format == format &&
+        const bool same_shape = e.seen && e.generation == generation && e.width == width &&
+                                e.height == height && e.format == format &&
                                 e.size == bytes;
         const bool identical = same_shape && e.hash == hash;
         e.seen = true;
