@@ -73,7 +73,9 @@ scripts are ad hoc and not committed; migration step 1 lands them as a tool.
   from service/device/policy/renderer libraries.** Only **3 of the 71** local libraries are imported at
   all: `libSceJson2` (3 titles, 46 imports), `libSceJson` (3 titles, 17), `libSceCesCs` (1 title, 6). The
   other 68 -- including every font, image, XML and ICU library -- have no unregistered import in any of
-  the four titles. By providing library the service-bound demand is renderer core 421, licensing 106,
+  the four titles. Units: the **52 are distinct imports per title, summed over the four titles**; the
+  per-library figures (46 + 17 + 6 = 69) count an import once per providing library, so they sum to
+  more. By providing library the service-bound demand is renderer core 421, licensing 106,
   service-dependent 95, IPMI client 60, device 38 (attributions, so an import several libraries export
   counts for each).
 - **Export collisions.** 0 of the 71 local libraries export a NID that `libkernel*` or
@@ -81,7 +83,8 @@ scripts are ad hoc and not committed; migration step 1 lands them as a tool.
   (23), `libSceJson` (17), `libSceSysmodule` (10), `libSceUlt` (5), `libSceFiber` (4), `libScePngDec`
   (1). That is a lower bound (registration was read off imports seen in the firmware).
 
-So the honest size of Wave 1 is small: three libraries and about 70 imports across three titles. The
+So the honest size of Wave 1 is small: three libraries and 52 distinct imports (69 counted per
+providing library) across three titles. The
 pool is the ceiling, the demand is what is worth doing, and the largest single bucket of unregistered
 imports -- the renderer core -- is HLE work this ADR leaves exactly where it is.
 
@@ -112,8 +115,13 @@ imports -- the renderer core -- is HLE work this ADR leaves exactly where it is.
    deriving the answer. **Enforcement:** the linker's export table is first-wins by NID alone
    (`src/loader/linker.cpp:124-136`), so an allowlisted library exporting a NID in the always-HLE set would
    silently shadow it for every module. The link step therefore **refuses** a firmware library whose exports
-   intersect that set, naming the NIDs, and the existing alias report (#1635) is treated as an error for
-   firmware libraries.
+   intersect that set, naming the NIDs. **The set is built from the firmware dump itself**: the export
+   lists of its own `libkernel*`, `libSceLibcInternal*`, renderer-core and ownership/store libraries, read
+   without linking them (5,087 NIDs for the first two groups on the measured dump). It is an explicit set
+   intersection before linking, not the alias report: the #1635 report only fires on a collision between
+   two *linked modules*, and prosper's own libkernel/libc are handlers, not linked modules, so it cannot see
+   a firmware library shadowing them. The alias report stays as a second check for firmware-vs-firmware
+   collisions.
 4. **Precedence.** `linker.cpp:153` binds an import to any linked module's export before it considers a
    handler, so linking a library replaces its HLE for every NID it exports; for the pilot that is 54
    registered handlers (`libSceJson2` 37, `libSceJson` 17), which is also what makes the differential
@@ -122,9 +130,11 @@ imports -- the renderer core -- is HLE work this ADR leaves exactly where it is.
    allowlisted library the title does not ship, so the outcome does not depend on link order.
 5. **The path policy gains a second root and a plaintext gate, reject-by-default.** `module_path_policy` is
    dump-root-relative (`classify_module_path(dump_root, path)`), so this is a new entry point for a firmware
-   root, not a list edit: it permits only the allowlisted file names, and **refuses, loudly and by name, any
-   file that is not plaintext** -- no ELF magic (for example a SELF wrapper), a failed parse, or whole-file
-   entropy at or above 7.5 bits/byte -- instead of attempting to load it. prosper decrypts nothing. The
+   root, not a list edit: it permits only the allowlisted file names. A separate function beside the policy
+   (`classify_firmware_file`) reads the bytes and **refuses, loudly and by name, any file that is not
+   plaintext** -- no ELF magic (for example a SELF wrapper), a failed parse, or whole-file entropy at or
+   above 7.5 bits/byte -- instead of attempting to load it. The path classifier stays pure and
+   filesystem-free, as `classify_module_path` is documented to be; only the byte gate touches the file. prosper decrypts nothing. The
    `fakelib/` rejection is unchanged. `tests/host/image/test_module_path_policy.cpp` gains arms, all on
    synthetic ELF fixtures so they run in CI: an allowlisted plaintext ELF is accepted; a non-allowlisted name,
    a random-byte file with the ELF magic, and a non-ELF file are refused; an export collision is refused;
@@ -149,7 +159,7 @@ imports -- the renderer core -- is HLE work this ADR leaves exactly where it is.
 ## Consequences
 
 - The HLE surface shrinks where it is cheapest to shrink, but measured demand says the first step is
-  modest: three libraries and about 70 imports across three of four titles. The case for continuing past
+  modest: three libraries and 52 distinct imports across three of four titles. The case for continuing past
   the pilot rests on titles that need more, which the census will show.
 - Most of the unlock comes from the shared base (libc/C++ runtime, a few kernel queries), which helps
   HLE-only titles equally; the 80 most blocking functions are worth doing whatever happens to this ADR.
@@ -166,8 +176,9 @@ imports -- the renderer core -- is HLE work this ADR leaves exactly where it is.
 
 - **Stay HLE-only (status quo).** Correct and simple; keeps paying the per-function cost for libraries whose
   real implementation is available and pure. Retained as the default and the fallback.
-- **Link all 353 libraries now.** Rejected as a first step, not as an end state. 281 are clients of a system
-  service or device, and 84 import the IPMI client. With no service on the other side such a library blocks
+- **Link all 353 libraries now.** Rejected as a first step, not as an end state. Of the 353, 71 compute
+  locally; the other 282 are clients of a system service or device, renderer-core, or ownership/store
+  libraries, and 84 import the IPMI client. With no service on the other side such a library blocks
   or errors on its first call, where today's HLE answers at once with a tailored value (the sign-in wait that
   stalled a title for good, #3784, is that failure class), so linking them regresses titles that work. The
   excluded libraries are excluded by the charter or because prosper's HLE is the translation layer for the
@@ -220,8 +231,11 @@ imports -- the renderer core -- is HLE work this ADR leaves exactly where it is.
 2. **Project identity.** Running genuine Sony system code at runtime departs from "reimplement from scratch,
    the way Wine reimplements Win32". Wine's native-DLL override is the closest precedent; the title-bundled
    `libc.prx` is an existing, narrower one.
-3. **The selector.** Is `--firmware-dir` an acceptable guest-behaviour selector given the policy's "no
-   environment variable to switch it off", and should LLE be on whenever it is supplied or opt-in per library?
+3. **The selector.** The charter says a selector "needs an issue whose resolution settles the default and
+   deletes the switch"; this ADR deliberately departs from that for `--firmware-dir`, which names the
+   location of an input and so stays for as long as the capability does. Is that departure acceptable,
+   and is it acceptable given the policy's "no environment variable to switch it off"? Should LLE be on
+   whenever the option is supplied, or opt-in per library?
 4. **The exclusion boundary.** Are the charter's four libraries, `libSceNpCommerce`/`libSceNpAuth`, the
    renderer core and the mechanical IPMI/`ioctl` rule enough, or should more be named?
 5. **Oracle authority.** May a firmware library's output serve as an oracle that HLE is corrected against,
