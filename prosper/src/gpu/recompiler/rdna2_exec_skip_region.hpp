@@ -33,16 +33,24 @@ struct ExecSkipRegionEffects {
     // An instruction format outside the VALU-only scope of this certificate (vector memory, LDS,
     // export, unknown). Not one of the ADR's four conditions; refused for being unclassified.
     bool unclassified = false;
+    // `ins` is not a complete program ending in a real s_endpgm (a counted-loop prelude ends in a
+    // synthetic terminator, for example). Liveness over it would read "the path ends without a read"
+    // for code it cannot see, so nothing is proven.
+    bool incomplete_stream = false;
 
     bool clean() const {
         return !scalar_live_out && !scalar_memory_effect && !wave_side_effect && !foreign_exit &&
-               !unclassified;
+               !unclassified && !incomplete_stream;
     }
 };
 
 // Classify the instructions in (branch_pc, target_pc) of `ins`, the region guarded by the forward
-// `s_cbranch_execz` at `branch_pc` whose skip target (the merge) is `target_pc`. `ins` is the whole
-// decoded program: scalar liveness at the merge is answered over it by `sgpr_dead_at_merge`.
+// `s_cbranch_execz` at `branch_pc` whose skip target (the merge) is `target_pc`. `ins` must be the whole
+// decoded program, ending in a real s_endpgm: scalar liveness at the merge is answered over it by
+// `sgpr_dead_at_merge`, whose "the path ends without a read" is only true of a complete stream. A
+// sub-stream (the counted-loop route's prelude ends in a synthetic terminator) is reported as
+// `incomplete_stream` and never clean. The VOPC SGPR-pair kill is sound on a complete stream and
+// is moot on any other, since that is refused here.
 // CONFIDENCE: HIGH for the effects it reports; MED that the whitelist is complete, which is why it
 // is a whitelist.
 ExecSkipRegionEffects classify_exec_skip_region(const std::vector<Rdna2Inst>& ins,

@@ -372,6 +372,27 @@ TEST(FragmentExecSkipRegion, ExitsOtherThanTheMergeAreRefused) {
     EXPECT_TRUE(classify({decode(0xBE802000u, Rdna2Format::SOP1, 0x20)}).foreign_exit);
 }
 
+TEST(FragmentExecSkipRegion, TruncatedStreamIsNeverClean) {
+    // The emitter can hand the classifier a sub-stream (a counted-loop prelude) that ends in a
+    // synthetic terminator; code after the cut, which may read the loaded s5, is invisible. The
+    // same region over a complete stream, where s5 is provably redefined, is clean.
+    auto complete = program({smem(0x8, 5)}, {smov(kSMovS5Zero)});
+    EXPECT_TRUE(classify_exec_skip_region(complete.ins, 0, complete.target).clean());
+    auto cut = program({smem(0x8, 5)});
+    cut.ins.back().synthetic_terminator = true;
+    const auto fx = classify_exec_skip_region(cut.ins, 0, cut.target);
+    EXPECT_TRUE(fx.incomplete_stream);
+    EXPECT_FALSE(fx.clean());
+    // A stream that simply stops without any terminator is equally unproven.
+    auto open_ended = program({vadd()});
+    open_ended.ins.pop_back();
+    EXPECT_TRUE(classify_exec_skip_region(open_ended.ins, 0, open_ended.target).incomplete_stream);
+    // The VOPC pair kill cannot conclude "dead" over a cut stream: it is refused before liveness.
+    auto cmp_cut = program({decode({0xD4C40002u, 0x00020501u}, Rdna2Format::VOPC, 0xC4)});
+    cmp_cut.ins.back().synthetic_terminator = true;
+    EXPECT_FALSE(classify_exec_skip_region(cmp_cut.ins, 0, cmp_cut.target).clean());
+}
+
 TEST(FragmentExecSkipRegion, UnknownFormatsAndBackwardRegionsFailClosed) {
     for (const auto fmt :
          {Rdna2Format::DS, Rdna2Format::MUBUF, Rdna2Format::MTBUF, Rdna2Format::MIMG,

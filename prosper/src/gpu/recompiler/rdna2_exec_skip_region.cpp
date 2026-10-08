@@ -66,6 +66,11 @@ ExecSkipRegionEffects classify_exec_skip_region(const std::vector<Rdna2Inst>& in
         fx.foreign_exit = true;
         return fx;
     }
+    // Fail closed on a truncated stream: the code after the cut is invisible to liveness.
+    if (ins.empty() || !ins.back().is_end || ins.back().synthetic_terminator) {
+        fx.incomplete_stream = true;
+        return fx;
+    }
     const auto dead = [&](const Operand& destination, int dwords) {
         return scalar_destination_dead(ins, target_pc, destination, dwords);
     };
