@@ -85,8 +85,14 @@ around `:560-590`) already name `draw-buffer-stage` as a cause.
   it as a dma-buf (`VK_KHR_external_memory_fd` + `VK_EXT_external_memory_dma_buf`). Its own
   constraints are **unverified** and must be checked before relying on it: udmabuf requires the
   memfd to be sealed with `F_SEAL_SHRINK`, ranges are page-granular, and the process needs access
-  to `/dev/udmabuf`. **Absent that route, Linux/AMD gets only Stage B plus the page-tracking half
-  of this ADR**, not the copy removal.
+  to `/dev/udmabuf`. udmabuf also caps what one buffer may cover, through two writable module
+  parameters read in `drivers/dma-buf/udmabuf.c` on torvalds/linux master (2026-10-07):
+  `list_limit` (default 1024) bounds the entries in one `UDMABUF_CREATE_LIST` request, and
+  `size_limit_mb` bounds one dma-buf's size (default `INT_MAX` MiB on master; older kernels and
+  distribution configs may set it lower, and some recollections put it at 64). Multi-GiB guest
+  direct memory may therefore need many udmabufs per range, or a raised limit, which needs root.
+  Migration step 1's probe reports every limit it hits. **Absent that route, Linux/AMD gets only
+  Stage B plus the page-tracking half of this ADR**, not the copy removal.
 - *macOS/MoltenVK.* `minImportedHostPointerAlignment` follows the host page size, 16 KiB on Apple
   silicon. macOS is out of scope for this ADR; Stage A stays off there.
 - *Aliasing.* One physical guest page can appear at several VAs (section views, ADR 0032). An import
@@ -157,8 +163,10 @@ around `:560-590`) already name `draw-buffer-stage` as a cause.
 - **Invert ownership: back guest direct memory with exported Vulkan memory.** Allocate
   host-visible device memory, export it (`VK_KHR_external_memory_fd` / `_win32`), and map that
   handle into the guest address space, so the GPU already owns every guest page and nothing is
-  imported. It sidesteps the userptr refusal on Linux/AMD and the section-view question on Windows
-  with one design, at the cost of rebuilding the guest memory backend (aliasing, ADR 0032 page
+  imported. It sidesteps the userptr refusal on Linux/AMD, where an exported dma-buf can be
+  `mmap`ed. **The Windows half is unknown**: an exported `OPAQUE_WIN32` handle is not known to be a section that `MapViewOfFile3` can place at a chosen
+  guest address, so this is not yet one design for both hosts; step 1's probe establishes it. The
+  cost is rebuilding the guest memory backend (aliasing, ADR 0032 page
   tracking and host-visible heap size limits all move onto driver allocations). Not chosen yet:
   Migration step 1 measures both this and the udmabuf route before Stage A picks one, and adopting
   it would be its own ADR on the guest memory backend.

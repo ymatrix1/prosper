@@ -111,9 +111,10 @@ Enforcement: runtime:host-copy-pressure, adr:0032
 
 ### PERF-P14 -- the GPU reads guest buffers in place unless a copy is measured cheaper
 
-A buffer a draw or dispatch reads is imported from guest memory where the device accepts the
-pointer; a device-local copy is kept only where measured reads per change make it cheaper, and is
-invalidated by page tracking. Every remaining CPU copy of a guest buffer is counted.
+A buffer a draw or dispatch reads is imported from guest memory where the host can import it (a
+host pointer, or a dma-buf over the guest memfd on Linux); a device-local copy is kept only where
+measured reads per change make it cheaper, and is invalidated by page tracking. Every remaining CPU
+copy of a guest buffer is counted.
 Status: proposed (adr:0033)
 Enforcement: runtime:host-copy-pressure, runtime:host-copy-per-flip, adr:0033
 
