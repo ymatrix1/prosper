@@ -85,7 +85,10 @@ covers is refused fail-visibly, never guessed.
    submit becomes a recorded `SHADER_WRITE` -> `INDIRECT_COMMAND_READ` dependency on the
    producer's buffer. This is not a second barrier mechanism: it is one more access kind
    (`INDIRECT_COMMAND_READ` on the argument range) fed to ADR 0011's barrier inference from the
-   recorded accesses. Under ADR 0009 Stage 1, producers will routinely still be in flight when the
+   recorded accesses. That inference pass does not exist yet (ADR 0011 is proposed), and this item
+   does not wait for it: until it lands, migration step 2 records the same dependency explicitly, of
+   the same shape (`SHADER_WRITE` -> `INDIRECT_COMMAND_READ` on the argument range), and 0011's
+   inference pass later absorbs that explicit edge rather than adding a second one. Under ADR 0009 Stage 1, producers will routinely still be in flight when the
    consumer is recorded, so "has landed" stops being a CPU-side question at all; the inferred
    dependency is what orders them. `indirect-dependencies` remains a skip reason only where the
    producer is genuinely outside anything prosper has recorded.
@@ -153,7 +156,9 @@ By measured skip reason, largest first:
 1. Re-measure: run Black Flag and two guarded titles with a manifest, and record the
    `indirect-dependencies`, `indirect-arguments-unreadable`, `host_fallbacks` and
    `indirect draw skipped` counts per frame, so the order below is evidence, not guess.
-2. Indirect dependencies on dispatches: barrier instead of skip (item 3).
+2. Indirect dependencies on dispatches: barrier instead of skip (item 3). This step does not wait
+   for ADR 0011: it records an interim explicit `SHADER_WRITE` -> `INDIRECT_COMMAND_READ`
+   dependency on the argument range, the same shape 0011's barrier inference later absorbs.
 3. Indirect draws: device route with validation pre-pass (items 1-2).
 4. `DRAW_INDEX_INDIRECT_MULTI` with a count buffer.
 5. Predication via conditional rendering (item 4).
